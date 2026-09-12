@@ -1,0 +1,86 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: aegis-scale-replicas-bounds
+  annotations:
+    policies.kyverno.io/title: "Bound Replica Scaling"
+    policies.kyverno.io/category: "Aegis Governance"
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/description: "Enforce that replica count never exceeds 10."
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: check-max-replicas
+      match:
+        any:
+        - resources:
+            kinds:
+              - Deployment
+              - Deployment/scale
+      validate:
+        message: "Replica count cannot exceed 10 (Aegis policy violation)."
+        pattern:
+          spec:
+            replicas: "<=10"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: aegis-resource-limits-bounds
+  annotations:
+    policies.kyverno.io/title: "Bound Resource Limits"
+    policies.kyverno.io/category: "Aegis Governance"
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/description: "Enforce that CPU limit <= 4 cores and memory limit <= 8192Mi."
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: check-cpu-and-memory-limits
+      match:
+        any:
+        - resources:
+            kinds:
+              - Deployment
+      validate:
+        message: "Container resource limits exceed allowed safety bounds (CPU <= 4, Memory <= 8192Mi) (Aegis policy violation)."
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: "*"
+                    (resources):
+                      (limits):
+                        (cpu): "<=4"
+                        (memory): "<=8192Mi"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: aegis-protected-namespaces
+  annotations:
+    policies.kyverno.io/title: "Protect System Namespaces"
+    policies.kyverno.io/category: "Aegis Governance"
+    policies.kyverno.io/severity: "critical"
+    policies.kyverno.io/description: "Disallow Aegis operations in system-reserved namespaces."
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: block-system-namespaces
+      match:
+        any:
+        - resources:
+            kinds:
+              - Pod
+              - Deployment
+              - Deployment/scale
+            namespaces:
+              - kube-system
+              - kyverno
+              - local-path-storage
+      validate:
+        message: "Remediation actions targeting protected system namespaces (kube-system, kyverno, local-path-storage) are prohibited (Aegis policy violation)."
+        deny: {}
