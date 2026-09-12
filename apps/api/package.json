@@ -10,6 +10,7 @@
     "test": "tsx src/test-e2e.ts",
     "test:concurrency": "tsx src/test-concurrency.ts",
     "test:diagnosis": "tsx src/test-diagnosis.ts",
+    "test:executor": "tsx src/test-executor.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },

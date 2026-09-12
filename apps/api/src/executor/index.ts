@@ -250,7 +250,8 @@ export async function executeRollbackDeployment(
 /**
  * Action handler: increase_resource_limit
  * Patches the Deployment's container resource limits (CPU/memory).
- * Requires that at least one of cpu or memory is strictly greater than the current value.
+ * Requires that no dimension (cpu or memory) may ever decrease from the current value,
+ * and that at least one dimension must strictly increase.
  * target: deployment name
  * params: { namespace, cpu, memory }
  */
@@ -272,11 +273,18 @@ export async function executeIncreaseResourceLimit(
 
   console.log(`[Executor] increase_resource_limit: current limits for '${target}': cpu=${currentCpu}, memory=${currentMemory}Mi`);
 
-  // Validate that at least one dimension is actually increasing
+  // Validate: no dimension may ever decrease
+  if (params.cpu < currentCpu || params.memory < currentMemory) {
+    throw new Error(
+      `increase_resource_limit cannot decrease any resource dimension: ` +
+      `proposed cpu=${params.cpu} (current=${currentCpu}), memory=${params.memory}Mi (current=${currentMemory}Mi)`
+    );
+  }
+  // Validate: at least one dimension must strictly increase
   if (params.cpu <= currentCpu && params.memory <= currentMemory) {
     throw new Error(
-      `increase_resource_limit rejected: proposed cpu=${params.cpu} (current=${currentCpu}) and memory=${params.memory}Mi (current=${currentMemory}Mi) ` +
-      `are not greater than current values on any dimension. At least one must increase.`
+      `increase_resource_limit requires at least one dimension to strictly increase: ` +
+      `proposed cpu=${params.cpu} (current=${currentCpu}), memory=${params.memory}Mi (current=${currentMemory}Mi)`
     );
   }
 
