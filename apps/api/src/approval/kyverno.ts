@@ -26,6 +26,28 @@ function isProtectedNamespace(ns: string): boolean {
 }
 
 /**
+ * Explicit gate: rejects any action targeting a protected namespace.
+ * This is an application-level check because Kyverno's validating webhook
+ * skips the `kube-system` namespace (via namespaceSelector) to avoid
+ * deadlocks with Kyverno's own pods, so the `aegis-protected-namespaces`
+ * ClusterPolicy never fires for kube-system targets.
+ * 
+ * Returns null if allowed, or an error result if denied.
+ */
+export function checkProtectedNamespaceGate(
+  namespace: string
+): KyvernoEvaluationResult | null {
+  if (isProtectedNamespace(namespace)) {
+    return {
+      allowed: false,
+      reason: `Remediation actions targeting protected system namespace '${namespace}' are prohibited (Aegis policy violation).`,
+      policyName: "aegis-protected-namespaces (application-layer gate)",
+    };
+  }
+  return null;
+}
+
+/**
  * Extracts the user-friendly Kyverno denial reason from kubectl stderr output.
  */
 function extractKyvernoDenial(stderr: string): string {
@@ -66,12 +88,12 @@ export async function evaluateKyvernoPolicy(
 
   const namespace = (params.namespace as string) || "default";
 
-  // Check for protected namespaces (Kyverno webhook skips these, so enforce in application code)
-  if (isProtectedNamespace(namespace)) {
-    return {
-      allowed: false,
-      reason: `Remediation actions targeting protected system namespace '${namespace}' are prohibited (Aegis policy violation).`,
-    };
+  // 2. Application-layer protected namespace gate
+  // Kyverno's webhook skips kube-system (namespaceSelector), so the ClusterPolicy
+  // never fires for kube-system targets. This check is mandatory.
+  const namespaceGate = checkProtectedNamespaceGate(namespace);
+  if (namespaceGate) {
+    return namespaceGate;
   }
 
   try {
