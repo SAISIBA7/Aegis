@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Aegis Console — Warm Industrial / Editorial Paper Theme */
+
+:root {
+  --background: #F6F4EE;
+  --surface: #EFECE4;
+  --surface-border: #E2DDD4;
+  --surface-highlight: #E7E3DA;
+}
+
+body {
+  color: #1A1816;
+  background-color: var(--background);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar for telemetry logs */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F6F4EE;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D4CDC2;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B8B0A2;
+}
