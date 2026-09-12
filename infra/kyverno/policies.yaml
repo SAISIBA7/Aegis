@@ -32,7 +32,7 @@ metadata:
     policies.kyverno.io/title: "Bound Resource Limits"
     policies.kyverno.io/category: "Aegis Governance"
     policies.kyverno.io/severity: "high"
-    policies.kyverno.io/description: "Enforce that CPU limit <= 4 cores and memory limit <= 8192Mi."
+    policies.kyverno.io/description: "Enforce that CPU limit <= 4 cores and memory limit <= 8192Mi when limits are specified."
 spec:
   validationFailureAction: Enforce
   background: false
@@ -64,7 +64,7 @@ metadata:
     policies.kyverno.io/title: "Protect System Namespaces"
     policies.kyverno.io/category: "Aegis Governance"
     policies.kyverno.io/severity: "critical"
-    policies.kyverno.io/description: "Disallow Aegis operations in system-reserved namespaces."
+    policies.kyverno.io/description: "Disallow Aegis operations in system-reserved namespaces. NOTE: Kyverno webhook skips kube-system/kyverno namespaces; enforcement happens in application code."
 spec:
   validationFailureAction: Enforce
   background: false

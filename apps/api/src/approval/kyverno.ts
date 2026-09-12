@@ -13,6 +13,19 @@ export interface KyvernoEvaluationResult {
 const KUBE_CONTEXT = process.env.KUBE_CONTEXT || "kind-aegis";
 
 /**
+ * Protected system namespaces where Aegis operations are prohibited.
+ * Must match the namespaces in aegis-protected-namespaces policy.
+ */
+const PROTECTED_NAMESPACES = new Set(["kube-system", "kyverno", "local-path-storage"]);
+
+/**
+ * Checks if a namespace is protected.
+ */
+function isProtectedNamespace(ns: string): boolean {
+  return PROTECTED_NAMESPACES.has(ns);
+}
+
+/**
  * Extracts the user-friendly Kyverno denial reason from kubectl stderr output.
  */
 function extractKyvernoDenial(stderr: string): string {
@@ -52,6 +65,14 @@ export async function evaluateKyvernoPolicy(
   }
 
   const namespace = (params.namespace as string) || "default";
+
+  // Check for protected namespaces (Kyverno webhook skips these, so enforce in application code)
+  if (isProtectedNamespace(namespace)) {
+    return {
+      allowed: false,
+      reason: `Remediation actions targeting protected system namespace '${namespace}' are prohibited (Aegis policy violation).`,
+    };
+  }
 
   try {
     switch (actionType) {
