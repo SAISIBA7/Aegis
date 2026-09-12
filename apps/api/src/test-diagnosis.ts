@@ -238,6 +238,7 @@ async function runTests() {
 
       if (
         job.status === JobStatus.PROPOSAL_GENERATED ||
+        job.status === JobStatus.PENDING_APPROVAL ||
         job.status === JobStatus.FAILED ||
         job.status === JobStatus.EXECUTED
       ) {
@@ -261,6 +262,9 @@ async function runTests() {
     const transitionedThroughDiagnosing = auditLogs.some(
       (l: any) => l.toStatus === JobStatus.DIAGNOSING
     );
+    const transitionedThroughProposalGenerated = auditLogs.some(
+      (l: any) => l.toStatus === JobStatus.PROPOSAL_GENERATED
+    );
     assert(
       transitionedThroughProvisioning,
       "Job must have transitioned through PROVISIONING (per AuditLog)"
@@ -270,8 +274,13 @@ async function runTests() {
       "Job must have transitioned through DIAGNOSING (per AuditLog)"
     );
     assert(
-      finalJob.status === JobStatus.PROPOSAL_GENERATED,
-      `Expected status PROPOSAL_GENERATED, but got ${finalJob.status}`
+      transitionedThroughProposalGenerated,
+      "Job must have transitioned through PROPOSAL_GENERATED (per AuditLog)"
+    );
+    assert(
+      finalJob.status === JobStatus.PROPOSAL_GENERATED ||
+        finalJob.status === JobStatus.PENDING_APPROVAL,
+      `Expected status PROPOSAL_GENERATED or PENDING_APPROVAL, but got ${finalJob.status}`
     );
     // 5c. Assert the structured proposal was saved on the job
     console.log("\nInspecting Generated Proposal on Job:");

@@ -54,7 +54,11 @@ export const LEGAL_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
     JobStatus.POLICY_VIOLATED,
     JobStatus.FAILED,
   ],
-  [JobStatus.APPLYING]: [JobStatus.EXECUTED, JobStatus.FAILED],
+  [JobStatus.APPLYING]: [
+    JobStatus.EXECUTED,
+    JobStatus.POLICY_VIOLATED,
+    JobStatus.FAILED,
+  ],
   // Terminal states (no further transitions allowed)
   [JobStatus.EXECUTED]: [],
   [JobStatus.FAILED]: [],

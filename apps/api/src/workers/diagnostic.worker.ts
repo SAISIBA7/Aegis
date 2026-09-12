@@ -1,5 +1,6 @@
 import { Worker, Job as BullJob } from "bullmq";
 import { JobStatus } from "@aegis/shared";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { transitionJobStatus } from "../stateMachine";
 import {
@@ -63,8 +64,24 @@ export async function processDiagnosticJob(
           reasoning: validProposal.reasoning,
           proposal: validProposal,
           agentGatewayTraces: gateway.getTraces(),
-        },
-        validProposal
+        } as unknown as Prisma.InputJsonValue,
+        validProposal as unknown as Prisma.InputJsonValue
+      );
+
+      // 4. Transition: PROPOSAL_GENERATED -> PENDING_APPROVAL
+      console.log(
+        `[DiagnosticWorker] Advancing job ${jobId} -> PENDING_APPROVAL for human review`
+      );
+      await transitionJobStatus(
+        prisma,
+        jobId,
+        JobStatus.PENDING_APPROVAL,
+        {
+          step: "awaiting_human_approval",
+          appName,
+          remediationAction: validProposal.actionType,
+          target: validProposal.target,
+        } as unknown as Prisma.InputJsonValue
       );
     } else {
       const validationErrors = validationResult.error.flatten();
@@ -81,7 +98,7 @@ export async function processDiagnosticJob(
         validationDetails: validationErrors,
         rawResponse,
         agentGatewayTraces: gateway.getTraces(),
-      });
+      } as unknown as Prisma.InputJsonValue);
     }
   } catch (error: any) {
     console.error(
@@ -95,7 +112,7 @@ export async function processDiagnosticJob(
       appName,
       error: error.message,
       agentGatewayTraces: gateway.getTraces(),
-    });
+    } as unknown as Prisma.InputJsonValue);
   }
 }
 
