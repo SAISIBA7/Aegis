@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# kind kubeconfig (contains cluster creds)
+kubeconfig*.yaml
+
+# Prisma
+apps/api/prisma/dev.db
+
+# Internal planning docs (not part of the deliverable)
+PROGRESS.md
+aegis_project_reference.md
+aegis_phase1_prompt.md
+aegis_phase2_prompt.md
+aegis_phase3_prompt.md
+aegis_phase4_prompt.md
+aegis_continuation_prompt.md
+implementation_plan.md
+.agents/skills/
+
+.claude/
+
+skills-lock.json

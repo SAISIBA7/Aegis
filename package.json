@@ -1,0 +1,23 @@
+{
+  "name": "aegis",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-service developer platform with policy-gated AI incident remediation",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:portal",
+    "dev:all": "npm run dev:portal",
+    "dev:infra": "docker compose up -d",
+    "dev:infra:down": "docker compose down",
+    "dev:infra:logs": "docker compose logs -f",
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/portal",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:portal": "npm run dev -w apps/portal",
+    "start:api": "npm run start -w apps/api",
+    "start:portal": "npm run start -w apps/portal",
+    "test:api": "npm run test -w apps/api"
+  }
+}
