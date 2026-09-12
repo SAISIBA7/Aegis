@@ -85,3 +85,36 @@ export async function enqueueDiagnosticJob(
     }
   );
 }
+
+export const REMEDIATION_QUEUE_NAME = "remediation-queue";
+
+export interface RemediationJobData {
+  jobId: string;
+  approver?: string;
+}
+
+export const remediationQueue = new Queue<RemediationJobData>(
+  REMEDIATION_QUEUE_NAME,
+  {
+    connection: redisConnection,
+  }
+);
+
+/**
+ * Enqueues an approved remediation job for background Kyverno policy check + Executor execution.
+ */
+export async function enqueueRemediationJob(
+  jobId: string,
+  approver?: string
+): Promise<void> {
+  await remediationQueue.add(
+    "execute-remediation",
+    { jobId, approver },
+    {
+      jobId: `rem-${jobId}`,
+      removeOnComplete: 100,
+      removeOnFail: 100,
+    }
+  );
+}
+

@@ -8,13 +8,20 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 import { app } from "./app";
 import { initProvisioningWorker } from "./workers/provisioning.worker";
 import { initDiagnosticWorker } from "./workers/diagnostic.worker";
-import { provisioningQueue, diagnosticQueue, redisConnection } from "./queue";
+import { initApprovalWorker } from "./workers/approval.worker";
+import {
+  provisioningQueue,
+  diagnosticQueue,
+  remediationQueue,
+  redisConnection,
+} from "./queue";
 
 const PORT = process.env.PORT || 3000;
 
 // Start the BullMQ background workers
 const provisioningWorker = initProvisioningWorker();
 const diagnosticWorker = initDiagnosticWorker();
+const approvalWorker = initApprovalWorker();
 
 const server = app.listen(PORT, () => {
   console.log(`[Aegis API] Server listening on port ${PORT}`);
@@ -23,6 +30,7 @@ const server = app.listen(PORT, () => {
   console.log(`[Aegis API] Jobs: GET http://localhost:${PORT}/jobs/:id`);
   console.log(`[Aegis API] Provisioning worker active and listening on queue.`);
   console.log(`[Aegis API] Diagnostic worker active and listening on queue.`);
+  console.log(`[Aegis API] Approval worker active and listening on queue.`);
 });
 
 async function shutdown(signal: string) {
@@ -31,8 +39,10 @@ async function shutdown(signal: string) {
     try {
       await provisioningWorker.close();
       await diagnosticWorker.close();
+      await approvalWorker.close();
       await provisioningQueue.close();
       await diagnosticQueue.close();
+      await remediationQueue.close();
       await redisConnection.quit();
       console.log("[Aegis API] Server and background workers closed.");
       process.exit(0);
