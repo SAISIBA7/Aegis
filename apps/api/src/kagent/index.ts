@@ -101,9 +101,9 @@ CRITICAL SAFETY & GOVERNANCE RULES:
 1. You have ZERO write or execution privileges on the cluster. Do NOT produce bash commands, kubectl CLI commands, or shell scripts.
 2. You MUST return ONLY a structured remediation proposal in valid JSON matching this exact schema:
 {
-  "actionType": "string",  // remediation action name (e.g. "update_image", "restart_pod", "rollback_deployment", "adjust_resources")
+  "actionType": "string",  // remediation action name — MUST be one of: "restart_pod", "rollback_deployment", "increase_resource_limit", "scale_replicas"
   "target": "string",      // target resource name (e.g. "deployment/my-app" or "my-app")
-  "params": { ... },       // key-value dictionary of parameters required to fix the failure, e.g. {"image": "nginx:alpine"} or {"cpu": 0.5, "memory": 512}
+  "params": { ... },       // key-value dictionary of parameters required to fix the failure, e.g. {"cpu": 0.5, "memory": 512} or {"replicas": 3}
   "reasoning": "string"    // concise root-cause diagnosis explaining what failed and why this remediation will resolve it
 }
 3. Your output MUST be ONLY the JSON object. Do NOT include any thinking process, analysis, explanation, preamble, markdown code fences, or trailing text. Start your response directly with the opening brace { and end with the closing brace }.`;

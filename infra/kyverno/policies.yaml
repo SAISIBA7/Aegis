@@ -51,10 +51,10 @@ spec:
               spec:
                 containers:
                   - name: "*"
-                    (resources):
-                      (limits):
-                        (cpu): "<=4"
-                        (memory): "<=8192Mi"
+                    resources:
+                      limits:
+                        cpu: "<=4"
+                        memory: "<=8192Mi"
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy

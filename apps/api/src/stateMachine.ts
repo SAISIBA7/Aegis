@@ -32,8 +32,9 @@ export class JobNotFoundError extends Error {
 /**
  * Valid state transitions table.
  * Note: PENDING_APPROVAL -> [APPROVED, REJECTED, FAILED]
- *       APPROVED -> [APPLYING, POLICY_VIOLATED, FAILED]
- * Policy check is sequential after human approval.
+ *       APPROVED -> [APPLYING, FAILED]
+ *       APPLYING -> [EXECUTED, POLICY_VIOLATED, FAILED]
+ * Policy check is sequential after human approval; POLICY_VIOLATED only reachable from APPLYING.
  */
 export const LEGAL_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   [JobStatus.INITIATED]: [JobStatus.PROVISIONING, JobStatus.FAILED],
@@ -51,7 +52,6 @@ export const LEGAL_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   ],
   [JobStatus.APPROVED]: [
     JobStatus.APPLYING,
-    JobStatus.POLICY_VIOLATED,
     JobStatus.FAILED,
   ],
   [JobStatus.APPLYING]: [
