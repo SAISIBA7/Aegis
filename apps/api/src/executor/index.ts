@@ -38,9 +38,10 @@ export const RestartPodParamsSchema = z.object({
 export type RestartPodParams = z.infer<typeof RestartPodParamsSchema>;
 
 // rollback_deployment: target is deployment name, params contains namespace
+// revision param deliberately removed — rollback always goes to the immediately
+// preceding revision only, avoiding unvalidated revision-number input surface.
 export const RollbackDeploymentParamsSchema = z.object({
   namespace: z.string().min(1).max(63).regex(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/),
-  revision: z.number().int().positive().optional(),
 });
 export type RollbackDeploymentParams = z.infer<typeof RollbackDeploymentParamsSchema>;
 
@@ -111,6 +112,66 @@ async function runKubectl(args: string[]): Promise<{ stdout: string; stderr: str
 }
 
 /**
+ * Reads the current CPU and memory limits for the first container in a deployment.
+ * Returns { cpu: string, memory: string } with values like "1" and "512Mi".
+ */
+async function getCurrentResourceLimits(
+  deploymentName: string,
+  namespace: string
+): Promise<{ cpu: string; memory: string } | null> {
+  try {
+    const { stdout } = await runKubectl([
+      "get",
+      `deployment/${deploymentName}`,
+      "-n",
+      namespace,
+      "--context",
+      KUBE_CONTEXT,
+      "-o",
+      "jsonpath={.spec.template.spec.containers[0].resources.limits}",
+    ]);
+    if (!stdout || stdout === "{}") {
+      return null;
+    }
+    const limits = JSON.parse(stdout);
+    return {
+      cpu: limits.cpu || "0",
+      memory: limits.memory || "0",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parses a Kubernetes resource string (e.g., "500m", "1", "512Mi") to a numeric value in base units.
+ * CPU: returns cores as float (e.g., "500m" -> 0.5, "1" -> 1)
+ * Memory: returns MiB as float (e.g., "512Mi" -> 512, "1Gi" -> 1024)
+ */
+function parseResourceValue(value: string, isCpu: boolean): number {
+  if (!value || value === "0") return 0;
+  if (isCpu) {
+    if (value.endsWith("m")) {
+      return parseFloat(value.slice(0, -1)) / 1000;
+    }
+    return parseFloat(value);
+  } else {
+    // Memory parsing: handle Ki, Mi, Gi suffixes
+    if (value.endsWith("Gi")) {
+      return parseFloat(value.slice(0, -2)) * 1024;
+    }
+    if (value.endsWith("Mi")) {
+      return parseFloat(value.slice(0, -2));
+    }
+    if (value.endsWith("Ki")) {
+      return parseFloat(value.slice(0, -2)) / 1024;
+    }
+    // Assume bytes if no suffix
+    return parseFloat(value) / (1024 * 1024);
+  }
+}
+
+/**
  * Action handler: restart_pod
  * Deletes the specified pod, allowing the Deployment to recreate it.
  * target: pod name
@@ -150,9 +211,9 @@ export async function executeRestartPod(
 
 /**
  * Action handler: rollback_deployment
- * Rolls back the Deployment to the previous revision (or specified revision).
+ * Rolls back the Deployment to the previous revision (always the immediately preceding one).
  * target: deployment name
- * params: { namespace, revision? }
+ * params: { namespace }
  */
 export async function executeRollbackDeployment(
   target: string,
@@ -161,7 +222,7 @@ export async function executeRollbackDeployment(
   sanitizeIdentifier(target, "deployment name");
   sanitizeIdentifier(params.namespace, "namespace");
 
-  console.log(`[Executor] rollback_deployment: rolling back deployment '${target}' in namespace '${params.namespace}'...`);
+  console.log(`[Executor] rollback_deployment: rolling back deployment '${target}' in namespace '${params.namespace}' to previous revision...`);
 
   const args = [
     "rollout",
@@ -173,10 +234,6 @@ export async function executeRollbackDeployment(
     KUBE_CONTEXT,
   ];
 
-  if (params.revision) {
-    args.push("--to-revision", String(params.revision));
-  }
-
   const { stdout, stderr } = await runKubectl(args);
 
   if (stderr && !stderr.includes("Warning:")) {
@@ -185,14 +242,15 @@ export async function executeRollbackDeployment(
 
   return {
     success: true,
-    message: `Deployment '${target}' rolled back${params.revision ? ` to revision ${params.revision}` : ""} in namespace '${params.namespace}'.`,
-    details: { deployment: target, namespace: params.namespace, revision: params.revision, stdout: stdout.trim() },
+    message: `Deployment '${target}' rolled back to previous revision in namespace '${params.namespace}'.`,
+    details: { deployment: target, namespace: params.namespace, stdout: stdout.trim() },
   };
 }
 
 /**
  * Action handler: increase_resource_limit
  * Patches the Deployment's container resource limits (CPU/memory).
+ * Requires that at least one of cpu or memory is strictly greater than the current value.
  * target: deployment name
  * params: { namespace, cpu, memory }
  */
@@ -202,6 +260,25 @@ export async function executeIncreaseResourceLimit(
 ): Promise<ExecutorResult> {
   sanitizeIdentifier(target, "deployment name");
   sanitizeIdentifier(params.namespace, "namespace");
+
+  // Read current limits before patching
+  const current = await getCurrentResourceLimits(target, params.namespace);
+  if (!current) {
+    throw new Error(`Could not read current resource limits for deployment '${target}' in namespace '${params.namespace}'`);
+  }
+
+  const currentCpu = parseResourceValue(current.cpu, true);
+  const currentMemory = parseResourceValue(current.memory, false);
+
+  console.log(`[Executor] increase_resource_limit: current limits for '${target}': cpu=${currentCpu}, memory=${currentMemory}Mi`);
+
+  // Validate that at least one dimension is actually increasing
+  if (params.cpu <= currentCpu && params.memory <= currentMemory) {
+    throw new Error(
+      `increase_resource_limit rejected: proposed cpu=${params.cpu} (current=${currentCpu}) and memory=${params.memory}Mi (current=${currentMemory}Mi) ` +
+      `are not greater than current values on any dimension. At least one must increase.`
+    );
+  }
 
   console.log(`[Executor] increase_resource_limit: patching deployment '${target}' in namespace '${params.namespace}' with cpu=${params.cpu}, memory=${params.memory}Mi...`);
 
@@ -250,7 +327,7 @@ export async function executeIncreaseResourceLimit(
   return {
     success: true,
     message: `Deployment '${target}' resource limits updated to cpu=${params.cpu}, memory=${params.memory}Mi in namespace '${params.namespace}'.`,
-    details: { deployment: target, namespace: params.namespace, cpu: params.cpu, memory: params.memory, stdout: stdout.trim() },
+    details: { deployment: target, namespace: params.namespace, cpu: params.cpu, memory: params.memory, previousCpu: currentCpu, previousMemory: currentMemory, stdout: stdout.trim() },
   };
 }
 
