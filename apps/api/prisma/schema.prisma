@@ -1,0 +1,33 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Job {
+  id        String     @id @default(uuid())
+  type      String
+  status    String
+  payload   Json
+  proposal  Json?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  auditLogs AuditLog[]
+
+  @@map("jobs")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  jobId      String
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  fromStatus String?
+  toStatus   String
+  timestamp  DateTime @default(now())
+  metadata   Json?
+
+  @@map("audit_logs")
+}
