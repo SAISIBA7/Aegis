@@ -32,7 +32,7 @@ export function initApprovalWorker(): Worker<RemediationJobData> {
     REMEDIATION_QUEUE_NAME,
     processRemediationJob,
     {
-      connection: redisConnection.duplicate(),
+      connection: redisConnection,
       concurrency: 3,
     }
   );

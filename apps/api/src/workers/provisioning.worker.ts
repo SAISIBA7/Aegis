@@ -349,7 +349,7 @@ export function initProvisioningWorker(
     PROVISIONING_QUEUE_NAME,
     processProvisioningJob,
     {
-      connection: redisConnection.duplicate(),
+      connection: redisConnection,
       concurrency,
     }
   );

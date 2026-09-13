@@ -126,7 +126,7 @@ export function initDiagnosticWorker(): Worker<DiagnosticJobData> {
     DIAGNOSTIC_QUEUE_NAME,
     processDiagnosticJob,
     {
-      connection: redisConnection.duplicate(),
+      connection: redisConnection,
       concurrency: 3,
     }
   );
