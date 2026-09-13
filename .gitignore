@@ -13,6 +13,7 @@ dist/
 build/
 .next/
 out/
+*.tsbuildinfo
 
 # Terraform
 **/.terraform/
@@ -47,8 +48,11 @@ aegis_phase1_prompt.md
 aegis_phase2_prompt.md
 aegis_phase3_prompt.md
 aegis_phase4_prompt.md
+aegis_phase5_prompt.md
 aegis_continuation_prompt.md
+phase6_prompt.md
 implementation_plan.md
+COMMIT_GUIDELINES.md
 .agents/skills/
 
 .claude/
