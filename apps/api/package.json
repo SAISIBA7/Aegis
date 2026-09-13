@@ -7,10 +7,11 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx src/test-e2e.ts",
+    "test": "jest",
     "test:concurrency": "tsx src/test-concurrency.ts",
     "test:diagnosis": "tsx src/test-diagnosis.ts",
     "test:executor": "tsx src/test-executor.ts",
+    "test:e2e": "tsx src/test-e2e.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
@@ -27,8 +28,11 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.12.12",
+    "jest": "^29.7.0",
     "prisma": "^5.14.0",
+    "ts-jest": "^29.4.12",
     "tsx": "^4.10.5",
     "typescript": "^5.4.5"
   }
