@@ -12,6 +12,11 @@ import {
   IconRefresh,
   IconActivity,
   IconX,
+  IconShieldCheck,
+  IconShieldX,
+  IconCpu,
+  IconArrowRight,
+  IconChecklist,
 } from "@tabler/icons-react";
 
 interface AuditLogEntry {
@@ -54,6 +59,10 @@ export default function JobStatusPage() {
   const [notFound, setNotFound] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Approval / rejection action states
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -79,7 +88,7 @@ export default function JobStatusPage() {
       setNotFound(false);
       setError(null);
 
-      // Check if job reached a terminal state
+      // Stop polling once a terminal state is reached
       if (isTerminalState(data.status)) {
         if (timerRef.current) {
           clearInterval(timerRef.current);
@@ -110,6 +119,57 @@ export default function JobStatusPage() {
       }
     };
   }, [id]);
+
+  // Handle human approval click
+  const handleApprove = async () => {
+    setIsActionSubmitting(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`${API_URL}/jobs/${id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approver: "dashboard_operator" }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || `Approval failed with status ${res.status}`);
+      }
+
+      await fetchJob(false);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to approve proposal");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
+  // Handle human rejection click
+  const handleReject = async () => {
+    setIsActionSubmitting(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`${API_URL}/jobs/${id}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rejecter: "dashboard_operator",
+          reason: "Rejected by operator via dashboard",
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || `Rejection failed with status ${res.status}`);
+      }
+
+      await fetchJob(false);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to reject proposal");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
 
   // Handle 404 Not Found gracefully
   if (notFound) {
@@ -151,81 +211,190 @@ export default function JobStatusPage() {
   const currentStatus = job?.status;
   const isComplete = currentStatus && isTerminalState(currentStatus);
 
-  // Stepper timeline definition for Phase 2/3 flow
-  const isFailure = currentStatus === JobStatus.FAILED || currentStatus === JobStatus.REJECTED;
-  const isPolicyViolation = currentStatus === JobStatus.POLICY_VIOLATED;
+  // Determine whether the job took the failure/diagnosis/governance pipeline path
+  const hasDiagnosisOrProposal =
+    job?.proposal !== undefined ||
+    currentStatus === JobStatus.DIAGNOSING ||
+    currentStatus === JobStatus.PROPOSAL_GENERATED ||
+    currentStatus === JobStatus.PENDING_APPROVAL ||
+    currentStatus === JobStatus.APPROVED ||
+    currentStatus === JobStatus.APPLYING ||
+    currentStatus === JobStatus.POLICY_VIOLATED ||
+    currentStatus === JobStatus.REJECTED ||
+    (job?.auditLogs &&
+      job.auditLogs.some((l) =>
+        [
+          JobStatus.DIAGNOSING,
+          JobStatus.PROPOSAL_GENERATED,
+          JobStatus.PENDING_APPROVAL,
+          JobStatus.APPROVED,
+          JobStatus.APPLYING,
+          JobStatus.POLICY_VIOLATED,
+          JobStatus.REJECTED,
+        ].includes(l.toStatus as JobStatus)
+      ));
 
-  const terminalStepLabel = isFailure
-    ? currentStatus === JobStatus.REJECTED ? "Rejected" : "Failed"
-    : isPolicyViolation
-    ? "Policy Violated"
-    : "Executed";
+  // Build responsive stepper depending on standard provisioning vs governed remediation flow
+  const STEPS: {
+    key: string;
+    label: string;
+    desc: string;
+    matchStatuses: JobStatus[];
+  }[] = hasDiagnosisOrProposal
+    ? [
+        {
+          key: "provisioning",
+          label: "1. Provisioning",
+          desc: "Terraform apply & health check",
+          matchStatuses: [JobStatus.INITIATED, JobStatus.PROVISIONING],
+        },
+        {
+          key: "diagnosis",
+          label: "2. AI Diagnosis",
+          desc: "agentgateway inspection & Nemotron reasoning",
+          matchStatuses: [JobStatus.DIAGNOSING, JobStatus.PROPOSAL_GENERATED],
+        },
+        {
+          key: "approval",
+          label: "3. Human Gate",
+          desc:
+            currentStatus === JobStatus.REJECTED
+              ? "Remediation rejected by human operator"
+              : currentStatus === JobStatus.PENDING_APPROVAL
+              ? "Awaiting human operator approval"
+              : "Remediation proposal approved",
+          matchStatuses: [
+            JobStatus.PENDING_APPROVAL,
+            JobStatus.APPROVED,
+            JobStatus.REJECTED,
+          ],
+        },
+        {
+          key: "execution",
+          label:
+            currentStatus === JobStatus.POLICY_VIOLATED
+              ? "4. Policy Violated"
+              : currentStatus === JobStatus.FAILED
+              ? "4. Remediation Failed"
+              : "4. Policy & Apply",
+          desc:
+            currentStatus === JobStatus.POLICY_VIOLATED
+              ? "Blocked by Kyverno admission webhook"
+              : currentStatus === JobStatus.EXECUTED
+              ? "Kyverno passed & Executor patched cluster"
+              : currentStatus === JobStatus.APPLYING
+              ? "Kyverno check & Executor run in progress"
+              : "Kyverno dry-run check and Executor action",
+          matchStatuses: [
+            JobStatus.APPLYING,
+            JobStatus.EXECUTED,
+            JobStatus.POLICY_VIOLATED,
+            JobStatus.FAILED,
+          ],
+        },
+      ]
+    : [
+        {
+          key: "initiated",
+          label: "Initiated",
+          desc: "Job accepted and queued",
+          matchStatuses: [JobStatus.INITIATED],
+        },
+        {
+          key: "provisioning",
+          label: "Provisioning",
+          desc: "Terraform apply in progress",
+          matchStatuses: [JobStatus.PROVISIONING],
+        },
+        {
+          key: "executed",
+          label: currentStatus === JobStatus.FAILED ? "Failed" : "Executed",
+          desc:
+            currentStatus === JobStatus.FAILED
+              ? "Workload deployment failed"
+              : "Workload active in cluster",
+          matchStatuses: [JobStatus.EXECUTED, JobStatus.FAILED],
+        },
+      ];
 
-  const terminalStepDesc = isFailure
-    ? "Workload execution failed"
-    : isPolicyViolation
-    ? "Violated cluster admission policy"
-    : "Pod running in cluster namespace";
-
-  const STEPS: { status: JobStatus; label: string; desc: string }[] = [
-    {
-      status: JobStatus.INITIATED,
-      label: "Initiated",
-      desc: "Job accepted and queued",
-    },
-    {
-      status: JobStatus.PROVISIONING,
-      label: "Provisioning",
-      desc: "Terraform apply in progress",
-    },
-    {
-      status: (currentStatus && isTerminalState(currentStatus)) ? currentStatus : JobStatus.EXECUTED,
-      label: terminalStepLabel,
-      desc: terminalStepDesc,
-    },
-  ];
-
-  // Helper to determine step state
-  const getStepState = (stepStatus: JobStatus) => {
+  const getStepState = (matchStatuses: JobStatus[]) => {
     if (!job) return "pending";
-    const logMatch = job.auditLogs.find((l) => l.toStatus === stepStatus);
-    const isCurrent = job.status === stepStatus;
+    const isCurrentlyActive = matchStatuses.includes(job.status);
+    const hasBeenVisited = job.auditLogs.some((l) =>
+      matchStatuses.includes(l.toStatus as JobStatus)
+    );
 
-    if (isCurrent) return "active";
-    if (logMatch) return "completed";
+    if (isCurrentlyActive) return "active";
+    if (hasBeenVisited) return "completed";
     return "pending";
   };
 
-  const getStepTimestamp = (stepStatus: JobStatus) => {
-    const log = job?.auditLogs.find((l) => l.toStatus === stepStatus);
-    if (!log) return null;
-    return new Date(log.timestamp).toLocaleTimeString();
+  const getStepTimestamp = (matchStatuses: JobStatus[]) => {
+    if (!job) return null;
+    const log = job.auditLogs
+      .slice()
+      .reverse()
+      .find((l) => matchStatuses.includes(l.toStatus as JobStatus));
+    return log ? new Date(log.timestamp).toLocaleTimeString() : null;
   };
 
   // High-contrast physical stamp badges for functional state readability
   const renderStatusBadge = (status?: JobStatus) => {
     switch (status) {
       case JobStatus.EXECUTED:
-      case JobStatus.APPROVED:
         return (
           <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#DCFCE7] text-[#166534] border border-[#86EFAC]">
             <IconCheck size={13} stroke={3} />
-            <span>{status}</span>
+            <span>EXECUTED</span>
           </span>
         );
-      case JobStatus.FAILED:
-      case JobStatus.REJECTED:
+      case JobStatus.APPROVED:
         return (
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#FCA5A5]">
-            <IconAlertCircle size={13} stroke={2.5} />
-            <span>{status}</span>
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#E0E7FF] text-[#3730A3] border border-[#C7D2FE]">
+            <IconCheck size={13} stroke={3} />
+            <span>APPROVED</span>
+          </span>
+        );
+      case JobStatus.APPLYING:
+        return (
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#EDE9FE] text-[#5B21B6] border border-[#DDD6FE]">
+            <IconActivity size={13} className="animate-spin" />
+            <span>APPLYING</span>
+          </span>
+        );
+      case JobStatus.PENDING_APPROVAL:
+        return (
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#FCD34D] animate-pulse">
+            <IconClock size={13} stroke={2.5} />
+            <span>PENDING APPROVAL</span>
           </span>
         );
       case JobStatus.POLICY_VIOLATED:
         return (
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#FCD34D]">
-            <IconAlertCircle size={13} stroke={2.5} />
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#FEF3C7] text-[#B45309] border border-[#F59E0B]">
+            <IconShieldX size={13} stroke={2.5} />
             <span>POLICY VIOLATED</span>
+          </span>
+        );
+      case JobStatus.REJECTED:
+        return (
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#FCA5A5]">
+            <IconX size={13} stroke={2.5} />
+            <span>REJECTED</span>
+          </span>
+        );
+      case JobStatus.FAILED:
+        return (
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#FCA5A5]">
+            <IconAlertCircle size={13} stroke={2.5} />
+            <span>FAILED</span>
+          </span>
+        );
+      case JobStatus.DIAGNOSING:
+        return (
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#F3E8FF] text-[#6B21A8] border border-[#D8B4FE]">
+            <IconCpu size={13} className="animate-pulse" />
+            <span>DIAGNOSING</span>
           </span>
         );
       case JobStatus.PROVISIONING:
@@ -247,20 +416,38 @@ export default function JobStatusPage() {
 
   // High-contrast audit badge helper
   const getAuditStatusColor = (statusName: string) => {
-    if (statusName === "EXECUTED" || statusName === "APPROVED") {
-      return "bg-[#DCFCE7] text-[#166534] border-[#86EFAC]";
+    switch (statusName) {
+      case "EXECUTED":
+        return "bg-[#DCFCE7] text-[#166534] border-[#86EFAC]";
+      case "APPROVED":
+        return "bg-[#E0E7FF] text-[#3730A3] border-[#C7D2FE]";
+      case "APPLYING":
+        return "bg-[#EDE9FE] text-[#5B21B6] border-[#DDD6FE]";
+      case "PENDING_APPROVAL":
+        return "bg-[#FEF3C7] text-[#92400E] border-[#FCD34D]";
+      case "POLICY_VIOLATED":
+        return "bg-[#FEF3C7] text-[#B45309] border-[#F59E0B]";
+      case "REJECTED":
+      case "FAILED":
+        return "bg-[#FEE2E2] text-[#991B1B] border-[#FCA5A5]";
+      case "PROVISIONING":
+        return "bg-[#DBEAFE] text-[#1E40AF] border-[#93C5FD]";
+      case "DIAGNOSING":
+      case "PROPOSAL_GENERATED":
+        return "bg-[#F3E8FF] text-[#6B21A8] border-[#D8B4FE]";
+      default:
+        return "bg-[#E2DDD4] text-[#1A1816] border-[#D4CDC2]";
     }
-    if (statusName === "FAILED" || statusName === "REJECTED") {
-      return "bg-[#FEE2E2] text-[#991B1B] border-[#FCA5A5]";
-    }
-    if (statusName === "POLICY_VIOLATED") {
-      return "bg-[#FEF3C7] text-[#92400E] border-[#FCD34D]";
-    }
-    if (statusName === "PROVISIONING") {
-      return "bg-[#DBEAFE] text-[#1E40AF] border-[#93C5FD]";
-    }
-    return "bg-[#E2DDD4] text-[#1A1816] border-[#D4CDC2]";
   };
+
+  // Extract policy violation details if available in audit log
+  const policyViolationLog = job?.auditLogs.find(
+    (l) => l.toStatus === JobStatus.POLICY_VIOLATED
+  );
+  const policyReason =
+    (policyViolationLog?.metadata?.reason as string) ||
+    (policyViolationLog?.metadata?.error as string) ||
+    "Action was rejected by Kyverno validating admission policy.";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -278,7 +465,7 @@ export default function JobStatusPage() {
         <div className="flex items-center space-x-2 text-xs font-mono">
           {!isComplete ? (
             <span className="inline-flex items-center space-x-2 px-2.5 py-1 rounded-md bg-[#EFECE4] text-[#1A1816] border border-[#E2DDD4]">
-              <span className="inline-flex rounded-full h-2 w-2 bg-[#1A4FD8]"></span>
+              <span className="inline-flex rounded-full h-2 w-2 bg-[#1A4FD8] animate-pulse"></span>
               <span>Live polling</span>
             </span>
           ) : (
@@ -336,12 +523,14 @@ export default function JobStatusPage() {
           Lifecycle Progression
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className={`grid grid-cols-1 sm:grid-cols-${STEPS.length} gap-4`}>
           {STEPS.map((step, idx) => {
-            const state = getStepState(step.status);
-            const time = getStepTimestamp(step.status);
-            const isStepFailure = step.status === JobStatus.FAILED || step.status === JobStatus.REJECTED;
-            const isStepPolicyViolation = step.status === JobStatus.POLICY_VIOLATED;
+            const state = getStepState(step.matchStatuses);
+            const time = getStepTimestamp(step.matchStatuses);
+
+            const isStepFailure =
+              currentStatus === JobStatus.FAILED || currentStatus === JobStatus.REJECTED;
+            const isStepPolicyViolation = currentStatus === JobStatus.POLICY_VIOLATED;
 
             let cardClasses = "bg-[#F6F4EE] border-[#E2DDD4] text-[#6B665E]";
             let badgeClasses = "bg-[#E2DDD4] text-[#6B665E]";
@@ -358,10 +547,10 @@ export default function JobStatusPage() {
                 badgeClasses = "bg-[#2563EB] text-white";
               }
             } else if (state === "completed") {
-              if (isStepFailure) {
+              if (isStepFailure && idx === STEPS.length - 1) {
                 cardClasses = "bg-[#FEF2F2] border-[#FCA5A5] text-[#991B1B]";
                 badgeClasses = "bg-[#DC2626] text-white";
-              } else if (isStepPolicyViolation) {
+              } else if (isStepPolicyViolation && idx === STEPS.length - 1) {
                 cardClasses = "bg-[#FFFBEB] border-[#FCD34D] text-[#92400E]";
                 badgeClasses = "bg-[#D97706] text-white";
               } else {
@@ -372,7 +561,7 @@ export default function JobStatusPage() {
 
             return (
               <div
-                key={step.status}
+                key={step.key}
                 className={`relative p-4 rounded-md border transition-all ${cardClasses}`}
               >
                 {/* Step header */}
@@ -382,7 +571,7 @@ export default function JobStatusPage() {
                       className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-mono font-bold ${badgeClasses}`}
                     >
                       {state === "completed" ? (
-                        isStepFailure ? (
+                        isStepFailure && idx === STEPS.length - 1 ? (
                           <IconX size={13} stroke={3} />
                         ) : (
                           <IconCheck size={13} stroke={3} />
@@ -397,7 +586,7 @@ export default function JobStatusPage() {
                   </div>
 
                   {state === "active" && (
-                    <span className="inline-flex rounded-full h-2 w-2 bg-[#1A4FD8]"></span>
+                    <span className="inline-flex rounded-full h-2 w-2 bg-[#1A4FD8] animate-pulse"></span>
                   )}
                 </div>
 
@@ -414,31 +603,203 @@ export default function JobStatusPage() {
         </div>
       </div>
 
-      {/* AI Diagnostic Proposal Card */}
+      {/* HUMAN APPROVAL GATE PANEL (Phase 6 Core Feature) */}
       {job?.proposal && (
-        <div className="p-5 rounded-lg bg-[#FFFBEB] border-2 border-[#F59E0B] text-xs font-mono space-y-3 shadow-sm">
-          <div className="flex items-center justify-between">
+        <div className="p-6 rounded-lg bg-white border-2 border-[#E2DDD4] space-y-5 shadow-sm">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-[#E2DDD4]">
+            <div className="flex items-center space-x-3">
+              <div className="h-8 w-8 rounded-md bg-[#FFF7ED] border border-[#FFEDD5] text-[#C2410C] flex items-center justify-center font-bold">
+                <IconChecklist size={20} />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-[#1A1816]">
+                  Governed Remediation Proposal
+                </h2>
+                <p className="text-xs text-[#6B665E]">
+                  AI-generated diagnosis awaiting human review and independent Kyverno policy verification
+                </p>
+              </div>
+            </div>
             <div className="flex items-center space-x-2">
-              <span className="px-2.5 py-1 rounded bg-[#F59E0B] text-white font-bold text-[11px] uppercase tracking-wider">
-                AI Diagnosis Generated (Nemotron 3.5)
+              <span className="px-2.5 py-1 rounded bg-[#F3E8FF] text-[#6B21A8] border border-[#D8B4FE] text-xs font-mono font-bold">
+                Nemotron 3.5 Lightning
+              </span>
+              <span className="px-2.5 py-1 rounded bg-[#EFECE4] text-[#1A1816] border border-[#E2DDD4] text-xs font-mono font-bold">
+                {job.proposal.actionType}
               </span>
             </div>
-            <span className="text-[#92400E] font-bold text-sm">Action: {job.proposal.actionType}</span>
           </div>
-          <div>
-            <span className="text-[#78350F] block text-[10px] uppercase font-bold tracking-wider">Root Cause & Reasoning</span>
-            <p className="text-[#92400E] text-sm mt-1 leading-relaxed font-sans font-medium">{job.proposal.reasoning}</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-[#FDE68A]">
-            <div>
-              <span className="text-[#78350F] block text-[10px] uppercase font-bold tracking-wider">Target Resource</span>
-              <span className="text-[#1A1816] font-bold text-sm">{job.proposal.target}</span>
+
+          {/* AI Diagnosis Reasoning */}
+          <div className="bg-[#FFFBEB] p-4 rounded-md border border-[#FDE68A] space-y-1.5">
+            <div className="flex items-center space-x-1.5 text-[#92400E] text-xs font-bold font-mono uppercase tracking-wider">
+              <IconCpu size={14} />
+              <span>Root Cause Diagnosis</span>
             </div>
-            <div>
-              <span className="text-[#78350F] block text-[10px] uppercase font-bold tracking-wider">Parameters</span>
-              <span className="text-[#1A1816] font-bold text-sm font-mono">{JSON.stringify(job.proposal.params)}</span>
-            </div>
+            <p className="text-sm text-[#78350F] leading-relaxed">
+              {job.proposal.reasoning}
+            </p>
           </div>
+
+          {/* Human-Readable Action Evaluation (Side-by-side comparison) */}
+          <div className="space-y-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#6B665E] block">
+              Proposed Cluster Mutation (Human-Readable Diff)
+            </span>
+
+            {job.proposal.actionType === "increase_resource_limit" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* CPU Comparison */}
+                <div className="p-4 rounded-md bg-[#F6F4EE] border border-[#E2DDD4] space-y-2">
+                  <div className="flex items-center justify-between text-xs text-[#6B665E] font-mono">
+                    <span>CPU Limit</span>
+                    <span className="text-[11px] text-[#1D7A46] font-bold">Policy Bound: ≤ 4 cores</span>
+                  </div>
+                  <div className="flex items-center space-x-3 text-lg font-mono font-bold">
+                    <span className="text-[#6B665E]">{job.payload?.cpu || "--"} cores</span>
+                    <IconArrowRight size={18} className="text-[#FF4F00]" />
+                    <span className="text-[#1A1816] text-xl font-extrabold">
+                      {String(job.proposal.params?.cpu || "--")} cores
+                    </span>
+                  </div>
+                </div>
+
+                {/* Memory Comparison */}
+                <div className="p-4 rounded-md bg-[#F6F4EE] border border-[#E2DDD4] space-y-2">
+                  <div className="flex items-center justify-between text-xs text-[#6B665E] font-mono">
+                    <span>Memory Limit</span>
+                    <span className="text-[11px] text-[#1D7A46] font-bold">Policy Bound: ≤ 8192 MiB</span>
+                  </div>
+                  <div className="flex items-center space-x-3 text-lg font-mono font-bold">
+                    <span className="text-[#6B665E]">{job.payload?.memory || "--"} MiB</span>
+                    <IconArrowRight size={18} className="text-[#FF4F00]" />
+                    <span className="text-[#1A1816] text-xl font-extrabold">
+                      {String(job.proposal.params?.memory || "--")} MiB
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {job.proposal.actionType === "scale_replicas" && (
+              <div className="p-4 rounded-md bg-[#F6F4EE] border border-[#E2DDD4] space-y-2">
+                <div className="flex items-center justify-between text-xs text-[#6B665E] font-mono">
+                  <span>Replica Count for Deployment: {job.proposal.target}</span>
+                  <span className="text-[11px] text-[#1D7A46] font-bold">Kyverno Bound: ≤ 10 replicas</span>
+                </div>
+                <div className="flex items-center space-x-3 text-lg font-mono font-bold">
+                  <span className="text-[#6B665E]">{job.payload?.replicas || 1} replicas</span>
+                  <IconArrowRight size={18} className="text-[#FF4F00]" />
+                  <span className="text-[#1A1816] text-xl font-extrabold">
+                    {String(job.proposal.params?.replicas || "--")} replicas
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {job.proposal.actionType === "rollback_deployment" && (
+              <div className="p-4 rounded-md bg-[#F6F4EE] border border-[#E2DDD4] space-y-2">
+                <div className="flex items-center justify-between text-xs text-[#6B665E] font-mono">
+                  <span>Target Deployment</span>
+                  <span className="text-[11px] text-[#1D7A46] font-bold">Preceding Revision Rollback</span>
+                </div>
+                <div className="text-sm font-mono font-bold text-[#1A1816]">
+                  deployment/{job.proposal.target} in namespace {String(job.proposal.params?.namespace || "default")}
+                </div>
+                <p className="text-xs text-[#6B665E]">
+                  Reverts deployment pod template to the immediately preceding revision. Arbitrary revision selection disabled for security.
+                </p>
+              </div>
+            )}
+
+            {job.proposal.actionType === "restart_pod" && (
+              <div className="p-4 rounded-md bg-[#F6F4EE] border border-[#E2DDD4] space-y-2">
+                <div className="flex items-center justify-between text-xs text-[#6B665E] font-mono">
+                  <span>Target Pod Deletion</span>
+                  <span className="text-[11px] text-[#1D7A46] font-bold">Protected Namespaces Enforced</span>
+                </div>
+                <div className="text-sm font-mono font-bold text-[#1A1816]">
+                  pod/{job.proposal.target} in namespace {String(job.proposal.params?.namespace || "default")}
+                </div>
+                <p className="text-xs text-[#6B665E]">
+                  Deletes pod to trigger immediate replica recreation by the Kubernetes Deployment controller.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Action Feedback Alerts */}
+          {actionError && (
+            <div className="p-3 rounded-md bg-[#FEF2F2] border border-[#FCA5A5] text-xs font-mono text-[#991B1B] flex items-center space-x-2">
+              <IconAlertCircle size={16} />
+              <span>{actionError}</span>
+            </div>
+          )}
+
+          {/* Status-specific Callouts */}
+          {currentStatus === JobStatus.PENDING_APPROVAL && (
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-[#E2DDD4]">
+              <div className="text-xs text-[#6B665E]">
+                <span className="font-bold text-[#1A1816]">Safety Policy Notice:</span> Clicking Approve will trigger Kyverno admission verification before executing changes on the cluster.
+              </div>
+              <div className="flex items-center space-x-3 w-full sm:w-auto">
+                <button
+                  onClick={handleReject}
+                  disabled={isActionSubmitting}
+                  className="flex-1 sm:flex-none px-4 py-2 rounded-md bg-white hover:bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] font-bold text-xs shadow-sm transition-all disabled:opacity-50"
+                >
+                  {isActionSubmitting ? "Processing..." : "Reject Remediation"}
+                </button>
+                <button
+                  onClick={handleApprove}
+                  disabled={isActionSubmitting}
+                  className="flex-1 sm:flex-none px-5 py-2 rounded-md bg-[#1D7A46] hover:bg-[#166534] text-white font-bold text-xs shadow-sm transition-all disabled:opacity-50"
+                >
+                  {isActionSubmitting ? "Approving..." : "Approve & Execute"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {currentStatus === JobStatus.POLICY_VIOLATED && (
+            <div className="p-4 rounded-md bg-[#FEF3C7] border border-[#F59E0B] text-xs font-mono space-y-1.5">
+              <div className="flex items-center space-x-2 text-[#92400E] font-bold">
+                <IconShieldX size={18} />
+                <span>Admission Policy Vetoed by Kyverno</span>
+              </div>
+              <p className="text-xs text-[#78350F] leading-relaxed">
+                {policyReason}
+              </p>
+              <div className="text-[11px] text-[#92400E] pt-1">
+                Remediation stopped immediately. The cluster was not modified.
+              </div>
+            </div>
+          )}
+
+          {currentStatus === JobStatus.REJECTED && (
+            <div className="p-4 rounded-md bg-[#FEE2E2] border border-[#FCA5A5] text-xs font-mono space-y-1">
+              <div className="flex items-center space-x-2 text-[#991B1B] font-bold">
+                <IconX size={18} />
+                <span>Proposal Rejected by Operator</span>
+              </div>
+              <p className="text-xs text-[#7F1D1D]">
+                The proposed remediation was rejected during human review. Job terminated with zero cluster modifications.
+              </p>
+            </div>
+          )}
+
+          {currentStatus === JobStatus.EXECUTED && (
+            <div className="p-4 rounded-md bg-[#DCFCE7] border border-[#86EFAC] text-xs font-mono space-y-1">
+              <div className="flex items-center space-x-2 text-[#166534] font-bold">
+                <IconShieldCheck size={18} />
+                <span>Remediation Successfully Executed</span>
+              </div>
+              <p className="text-xs text-[#14532D]">
+                Independent Kyverno admission policy passed. Cluster state updated by Aegis Executor.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -480,7 +841,7 @@ export default function JobStatusPage() {
             <span>Audit Log ({job?.auditLogs?.length || 0})</span>
           </div>
 
-          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
             {job?.auditLogs && job.auditLogs.length > 0 ? (
               job.auditLogs.map((log, i) => (
                 <div

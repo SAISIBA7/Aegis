@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Space_Grotesk, Space_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
-import { IconShield, IconServer, IconPlus, IconCpu } from "@tabler/icons-react";
+import { IconShield, IconServer, IconPlus, IconCpu, IconChecklist } from "@tabler/icons-react";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -53,6 +53,15 @@ export default function RootLayout({
                 <span className="text-[#6B665E]">Cluster:</span>
                 <span className="text-[#1A1816] font-bold">kind-aegis</span>
               </div>
+
+              {/* Governance Approvals Link */}
+              <Link
+                href="/approvals"
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md bg-[#EFECE4] hover:bg-[#E7E3DA] border border-[#E2DDD4] text-[#1A1816] font-medium text-xs shadow-sm transition-all"
+              >
+                <IconChecklist size={15} stroke={2} />
+                <span>Approvals</span>
+              </Link>
 
               {/* New Deployment Button */}
               <Link
